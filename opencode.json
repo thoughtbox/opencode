@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "AGENTS.md"
+  ],
+  "mcp": {
+    "mempalace": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "./launch-mempalace.sh"
+      ]
+    }
+  }
+}

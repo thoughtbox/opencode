@@ -1,0 +1,8 @@
+.env.local
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+.pip-build-tmp/
