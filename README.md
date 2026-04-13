@@ -26,8 +26,11 @@ This repo is only an OpenCode-oriented integration template and documentation la
 ## Included
 
 - `README.md`: setup and usage guide
-- `opencode.json`: OpenCode MCP config pointing to the launcher script
+- `opencode.json`: OpenCode MCP config for the MemPalace server
 - `launch-mempalace.sh`: validates `MEMPALACE_PYTHON` and starts the MCP server
+- `.opencode/plugins/mempalace-autosave.js`: incrementally builds full session transcripts and syncs them into MemPalace
+- `mempalace-autosave-sync.py`: upserts stable per-session autosave drawers into MemPalace
+- `mempalace-autosave-mine.sh`: manually re-sync the autosave spool if needed
 - `AGENTS.md`: project instructions for when to use memory
 - `.env.example`: environment variable template
 - `setup.sh`: installs MemPalace, detects OS, and writes `.env.local`
@@ -37,34 +40,39 @@ This repo is only an OpenCode-oriented integration template and documentation la
 - Mine project files into MemPalace
 - Mine chat exports into MemPalace
 - Expose MemPalace to OpenCode as a local MCP server
+- Auto-save full OpenCode idle-session transcripts into a local spool and sync them into MemPalace
 - Tell OpenCode to consult memory before making historical or architectural assumptions
 
 ## What to know
 
-MemPalace documents auto-save hooks for Claude Code and Codex. I did not find an equivalent OpenCode hook flow in the current OpenCode docs, so this template focuses on the part that maps cleanly to OpenCode today: mining plus MCP retrieval.
+OpenCode now exposes a plugin system with event hooks. This template uses a local plugin under `.opencode/plugins/` to cache message events, flush the full session transcript on `session.idle`, and then sync that transcript into MemPalace with stable drawer IDs.
+
+This is a practical local-first transcript exporter. It rewrites one transcript file per session and upserts only changed MemPalace drawers so repeat autosaves update the same conversation instead of accumulating duplicate snapshots.
+
+Autosave files are written with restrictive permissions when the filesystem supports them, and `.mempalace-autosave/` is ignored by git.
 
 ## How it fits together
 
 ```text
-project files / chat exports
-            |
-            v
-     mempalace mine
-            |
-            v
-   local MemPalace index
-            |
-            v
-  launch-mempalace.sh
-            |
-            v
-  mempalace.mcp_server
-            |
-            v
-         OpenCode
-            |
-            v
-   memory-aware planning and edits
+project files / chat exports / autosave spool
+                    |
+                    v
+             mempalace mine
+                    |
+                    v
+           local MemPalace index
+                    |
+                    v
+          launch-mempalace.sh
+                    |
+                    v
+          mempalace.mcp_server
+                    |
+                    v
+                 OpenCode
+                    |
+                    v
+    plugin saves idle sessions to spool
 ```
 
 ## Quick Start
@@ -219,6 +227,36 @@ Search memory for earlier discussions about retries and background jobs, then us
 What did we previously decide about Postgres indexes in this codebase? Use MemPalace if needed.
 ```
 
+### 7. Auto-save behavior
+
+The included OpenCode plugin listens for `session.idle` events.
+
+When a session becomes idle it:
+
+- uses the incremental in-memory session cache, hydrating from OpenCode once after plugin startup if needed
+- rewrites the full transcript at `.mempalace-autosave/sessions/<session-id>.txt`
+- syncs only changed transcript chunks into MemPalace with stable per-session drawer IDs
+- skips duplicate syncs when the transcript content has not changed
+- omits raw tool output from the persisted transcript
+
+If you want the autosave spool somewhere else, set:
+
+```bash
+export MEMPALACE_AUTOSAVE_DIR="$HOME/.local/share/opencode-mempalace"
+```
+
+You can also re-sync the spool manually:
+
+```bash
+./mempalace-autosave-mine.sh
+```
+
+Or with an explicit path:
+
+```bash
+./mempalace-autosave-mine.sh /path/to/autosave-dir
+```
+
 ## Files
 
 ### `opencode.json`
@@ -226,6 +264,18 @@ What did we previously decide about Postgres indexes in this codebase? Use MemPa
 Registers MemPalace as a local MCP server for OpenCode. This file can be placed either in `~/.config/opencode/` for global use or in a project root for per-project use. See [step 3](#3-choose-where-to-put-the-opencode-config) for details.
 
 It calls `launch-mempalace.sh`, which validates `MEMPALACE_PYTHON` and starts the server. It also loads `AGENTS.md` as a project instruction file.
+
+### `.opencode/plugins/mempalace-autosave.js`
+
+Project-local OpenCode plugin. Hooks into `session.idle`, exports the full session transcript to `.mempalace-autosave/sessions/<session-id>.txt`, and invokes the sync script.
+
+### `mempalace-autosave-sync.py`
+
+Reads autosave transcript files, chunks them like MemPalace conversation imports, and upserts stable drawers keyed by transcript path plus chunk index. Unchanged chunks are skipped and stale chunk IDs are deleted so later autosaves update the same session instead of creating duplicate history.
+
+### `mempalace-autosave-mine.sh`
+
+Helper script for manually re-syncing the autosave spool. Uses `MEMPALACE_AUTOSAVE_DIR` if set, otherwise defaults to `.mempalace-autosave`.
 
 ### `launch-mempalace.sh`
 
@@ -279,6 +329,21 @@ Re-run mining whenever the underlying source material changes.
 ```bash
 ~/.venvs/mempalace/bin/mempalace status
 ~/.venvs/mempalace/bin/mempalace search "why did we switch auth providers"
+```
+
+## Run Local Tests
+
+This repo includes a minimal regression harness for the autosave integration.
+
+```bash
+./run-tests.sh
+```
+
+Equivalent individual commands:
+
+```bash
+node tests/test-mempalace-autosave-plugin.mjs
+python3 -m unittest tests/test_mempalace_autosave_sync.py
 ```
 
 ## Troubleshooting

@@ -6,3 +6,17 @@ __pycache__/
 *.pyc
 .DS_Store
 .pip-build-tmp/
+.mempalace-autosave/
+
+# Local AI tool state/config directories
+.claude/
+.codex/
+.cursor/
+
+# Ignore OpenCode local state by default, but keep the example plugin tracked
+.opencode/
+!.opencode/
+.opencode/*
+!.opencode/plugins/
+.opencode/plugins/*
+!.opencode/plugins/mempalace-autosave.js

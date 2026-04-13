@@ -1,58 +1,30 @@
 # Issues
 
 ## Review Scope
-- All files in the template repo
-- Documentation/template repo with shell scripts and OpenCode config
-- No application code; risk surface is config correctness, shell safety, and documentation accuracy
+- Updated OpenCode autosave implementation in `.opencode/plugins/mempalace-autosave.js`, `mempalace-autosave-sync.py`, `mempalace-autosave-mine.sh`, `.gitignore`, and `README.md`
+- Focused on the previously identified security and performance issues in autosave persistence and sync behavior
 
 ## Overall Assessment
-- All identified issues have been fixed
+- safe to merge
 
 ## Priority Summary
+1. No unresolved material security or performance issues were found in the current autosave implementation.
 
-All 4 findings from the initial review have been resolved:
-
-1. ~~[Medium] Unset MEMPALACE_PYTHON produces opaque MCP failure~~ — **Fixed**: added `launch-mempalace.sh` that validates the variable and prints a clear error
-2. ~~[Medium] setup.sh assumes Unix venv layout~~ — **Fixed**: `setup.sh` now probes `bin/python`, `Scripts/python.exe`, and `Scripts/python` after venv creation
-3. ~~[Low] README heading hierarchy broken~~ — **Fixed**: numbered steps and file descriptions are now h3 under their h2 parents
-4. ~~[Low] Heredoc output breaks on paths with special characters~~ — **Fixed**: replaced heredoc with `printf` to avoid unquoted expansion
-
-## Fixes Applied
-
-### [Medium] Unset MEMPALACE_PYTHON produces opaque MCP failure
-- Original location: `opencode.json:10-11`
-- Fix: Added `launch-mempalace.sh` as a launcher script that checks `MEMPALACE_PYTHON` is set and executable before calling `python -m mempalace.mcp_server`. Updated `opencode.json` to call the launcher instead of using `{env:MEMPALACE_PYTHON}` directly in the command array.
-- Files changed: `opencode.json`, new file `launch-mempalace.sh`
-
-### [Medium] setup.sh assumes Unix venv layout
-- Original location: `setup.sh:7`
-- Fix: Replaced the hardcoded `$VENV_DIR/bin/python` assignment with a post-creation probe that checks `bin/python`, `Scripts/python.exe`, and `Scripts/python` in order. Exits with a clear error if none are found.
-- Files changed: `setup.sh`
-
-### [Low] README heading hierarchy broken
-- Original location: `README.md:53-68`
-- Fix: Changed all numbered quick-start steps and file descriptions from `##` (h2) to `###` (h3) so they nest under their parent sections.
-- Files changed: `README.md`
-
-### [Low] Heredoc output breaks on paths with special characters
-- Original location: `setup.sh:19-21`
-- Fix: Replaced the `cat > "$ENV_FILE" <<EOF` heredoc with `printf 'export MEMPALACE_PYTHON="%s"\n' "$MEMPALACE_PYTHON" > "$ENV_FILE"`, which avoids unquoted shell expansion of the path value.
-- Files changed: `setup.sh`
+## By Type
 
 ## Missing or Weak Tests
-- No automated tests exist. Highest-value additions for a future CI pipeline:
-  1. `shellcheck` pass on `setup.sh` and `launch-mempalace.sh`
-  2. JSON schema validation of `opencode.json` against `https://opencode.ai/config.json`
-  3. Markdown lint pass to enforce heading hierarchy
+- Existing coverage now includes a Node plugin regression test for sanitized transcript persistence and no-op idle flushes, plus a Python unittest for sync idempotency and stale chunk deletion.
+- Add a permission-focused test for the autosave directory and transcript files where the platform supports `chmod` semantics.
+- Add a long-session benchmark or regression test to quantify idle flush cost on large transcripts.
 
 ## Positive Notes
-- `set -eu` in both shell scripts catches errors early
-- All shell variables are consistently double-quoted, avoiding word-splitting and globbing bugs
-- `command -v` is the portable POSIX way to check for a binary; preferred over `which`
-- `launch-mempalace.sh` uses `exec` to replace itself with the Python process, avoiding an unnecessary parent shell
-- `.gitignore` correctly excludes `.env.local` and `.env` to prevent accidental secret commits
-- Attribution to the upstream MemPalace project is thorough and well-placed
+- Raw tool output is no longer persisted; assistant fallback content is reduced to bounded structural markers such as tool status and patch file names.
+- Autosave directories and transcript files are created with restrictive modes (`0700`/`0600`) on platforms that honor them.
+- The plugin now maintains an incremental in-memory session cache from OpenCode events and only hydrates from the server when needed after startup.
+- The sync script skips unchanged chunks and deletes stale chunk IDs, substantially reducing ChromaDB churn versus blind full upserts.
+- `.mempalace-autosave/` is ignored by git to reduce accidental publication of local transcript spools.
 
 ## Unverified Areas
-- Whether the MemPalace MCP server starts cleanly with no palace initialized (the template instructs users to init first, but the error path if they skip that step is unknown)
-- Whether OpenCode's MCP timeout default of 5 seconds is long enough for the MemPalace MCP server's Python startup time, especially on first run when ChromaDB initializes
+- End-to-end plugin behavior against a live OpenCode runtime was not exercised here; validation was limited to code inspection plus syntax checks.
+- Very large or very long-lived sessions may still merit profiling because transcript rendering and chunk comparison remain proportional to changed session size at flush time.
+- Filesystem permission hardening is best-effort and may not be enforced uniformly on all platforms or mounts.
