@@ -1,8 +1,26 @@
 import { createHash } from "node:crypto"
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
+import { access, chmod, mkdir, readFile, writeFile } from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 const sessionCache = new Map()
+const AUTOSAVE_PLUGIN_KEY = "__mempalaceAutosavePluginLoaded"
+const pluginFileDir = path.dirname(fileURLToPath(import.meta.url))
+
+function isProjectPlugin() {
+  return path.basename(pluginFileDir) === "plugins" && path.basename(path.dirname(pluginFileDir)) === ".opencode"
+}
+
+function defaultAutosaveRoot(directory) {
+  if (isProjectPlugin()) {
+    return path.join(directory, ".mempalace-autosave")
+  }
+
+  const projectBase = (path.basename(directory || "unknown-project") || "unknown-project").replace(/[^A-Za-z0-9._-]/g, "_")
+  const digest = createHash("sha256").update(directory || projectBase).digest("hex").slice(0, 8)
+  return path.join(os.homedir(), ".local", "share", "opencode-mempalace", `${projectBase}-${digest}`)
+}
 
 function createSessionState() {
   return {
@@ -327,7 +345,28 @@ function coerceData(result) {
 }
 
 function autosaveRoot(directory) {
-  return process.env.MEMPALACE_AUTOSAVE_DIR || path.join(directory, ".mempalace-autosave")
+  return process.env.MEMPALACE_AUTOSAVE_DIR || defaultAutosaveRoot(directory)
+}
+
+async function resolveSyncScript(directory) {
+  const candidates = [
+    process.env.MEMPALACE_AUTOSAVE_SYNC,
+    path.join(pluginFileDir, "mempalace-autosave-sync.py"),
+    path.resolve(pluginFileDir, "..", "mempalace-autosave-sync.py"),
+    path.resolve(pluginFileDir, "..", "..", "mempalace-autosave-sync.py"),
+    path.join(directory, "mempalace-autosave-sync.py"),
+  ].filter(Boolean)
+
+  for (const candidate of candidates) {
+    try {
+      await access(candidate)
+      return candidate
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  throw new Error("could not locate mempalace-autosave-sync.py")
 }
 
 async function ensurePrivateDir(directoryPath) {
@@ -399,7 +438,7 @@ async function runSync({ $, directory, transcriptPath }) {
   const python = process.env.MEMPALACE_PYTHON
   if (!python) return
 
-  const scriptPath = path.join(directory, "mempalace-autosave-sync.py")
+  const scriptPath = await resolveSyncScript(directory)
   await $`${python} ${scriptPath} ${transcriptPath} --wing ${path.basename(directory)}`
 }
 
@@ -484,6 +523,14 @@ async function enqueueFlush(sessionID, task) {
 }
 
 export const MemPalaceAutosavePlugin = async ({ $, directory, client }) => {
+  if (globalThis[AUTOSAVE_PLUGIN_KEY]) {
+    return {
+      event: async () => {},
+    }
+  }
+
+  globalThis[AUTOSAVE_PLUGIN_KEY] = true
+
   return {
     event: async ({ event }) => {
       if (!event) {
